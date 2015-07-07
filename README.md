@@ -14,7 +14,9 @@ $emailParser->getBody('text/plain');
 ```
 
 ### Get the attachements
+```php
 $attachements = $emailParser->getAttachements();
+```
 
 Store them somewhere if you like
 ```php

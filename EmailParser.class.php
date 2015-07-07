@@ -1,33 +1,47 @@
 <?php
+/*
+ * Copyright 2015 Nicholas John Koch (njk@pilot.hamburg)
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+ 
 require_once ('BodyPart.class.php');
 require_once ('Attachement.class.php');
 /*
- * DEV
+ * version 1.0
+ * This class is the main class for creating objects that parse emails. It crawls
+ * recursively through the email content and extracts the body parts.
  */
 class EmailParser {
     
-    const DEBUG = FALSE;
-    const TRACE = FALSE;
+    const DEBUG = FALSE;				// set TRUE to see some debugging information
+    const TRACE = FALSE;				// set TRUE for a lot of information ;-)
 
-    const PLAINTEXT = 1;
-    const HTML = 2;
+    private $emailRaw = array();		// has the raw email data line by line
     
-    private $finished = false;
-
-    private $emailRaw = array();
+    private $headerLines = array();		// holds the main header lines of the email
+    private $bodyLines = array();		// all the email body content
     
-    private $headerLines = array();
-    private $bodyLines = array();
+    private $contentIds = array();      // HTML email often uses these IDs to identify inine objects
+    private $contentDispos = array();   // type identifying attachements
     
-    private $contentIds = array();
-    private $contentDispos = array();
-    
-    private $attachements = array();
+    private $attachements = array();	// array holding the extracted attachements
     
     
-    private $allBodyParts = array();
+    private $allBodyParts = array();	// every body that has been found is stored in this array as
+    									// a BodyPart object
     
-    public $validHeaderKeys = array(
+    public $validHeaderKeys = array(	// only these keys are valid to be parsed 
 			'subject',
 			'content-type',
 			'content-id',
@@ -42,26 +56,27 @@ class EmailParser {
         ); 
         
     public function  __construct($emailRaw) {
+    	// Make the email an array
         $this->emailRaw = preg_split ('/$\R?^/m', $emailRaw);
         
-        
-        
+        // Major email object
         $mainBodyPart = new BodyPart();
 
+        // Extract all the header information
         $this->headerLines = $this->parseHeader($this->emailRaw);
         
-        
+        // and store them in the major object
         $mainBodyPart->setHeader($this->headerLines);
       
-         
-        $bodies = $this->parseBody($this->emailRaw, $this->headerLines['content-type']);
+        // first level of body part extraction
+        $bodies = self::parseBody($this->emailRaw, $this->headerLines['content-type']);
         
+        // and storage in main object
         $mainBodyPart->setBody($bodies);
         
-        
-        
+        // Routine for the recursive extraction work
         if (sizeof($bodies) > 1) {
-        	// Must be a multipart at this point.
+        	// Must be a multipart at this point because we found more than one bodies
         	foreach ( $bodies as $body) {
         		$this->dig($body);
         	}
@@ -69,17 +84,19 @@ class EmailParser {
         	array_push ($this->allBodyParts, $mainBodyPart);
         }
         
-        
     }
     
-    
+    /*
+     * Recursive working method
+     * It takes the body part as a string and keeps digging if necessary
+     */
     private function dig($bodyPart) {
     	$bodyLines = explode(PHP_EOL, trim($bodyPart));
 		$headerLines = $this->parseHeader($bodyLines);
 		
 		if (array_key_exists('content-type', $headerLines)) {
 			$bp = new BodyPart();
-			$_bodies = $this->parseBody($bodyLines, $headerLines['content-type']);
+			$_bodies = self::parseBody($bodyLines, $headerLines['content-type']);
 			$bp->setBody($_bodies);
 					
 			if (sizeof($_bodies) > 1) {
@@ -89,6 +106,7 @@ class EmailParser {
 			} else {			
 				$bp->setHeader($headerLines);
 				
+				// Is it a attachement?
 				if (array_key_exists('content-disposition', $headerLines)) {
 					array_push ($this->contentDispos, trim($headerLines['content-disposition']));
 					
@@ -98,17 +116,21 @@ class EmailParser {
 					$filename = str_replace(array("'", '"'), '', trim($matches[1]));
 					
 					$a->setFilename($filename);
-					$a->setContent($this->makeBody($bp));
+					$a->setContent(self::makeBody($bp));
 					$a->setContentType($headerLines['content-type']);
 					
 					array_push ($this->attachements, $a);
-				} else if (array_key_exists('content-id', $headerLines)) {
+				} else
+				// or just a embedded object?
+				if (array_key_exists('content-id', $headerLines)) {
 					array_push ($this->contentIds, trim($headerLines['content-id']));
 					
 					$a = new Attachement();
 					
-					$filename = self::sanitize_file_name($headerLines['content-id']);
+					// Create the filename from the cid:
+					$filename = self::sanitizeFileName($headerLines['content-id']);
 					
+					// The content type string often holds more data than just the mime type
 					$ct = $headerLines['content-type'];
 					if (strpos($ct, ';')) {
 						$_ct = explode(';', $ct);
@@ -118,48 +140,41 @@ class EmailParser {
 					}
 					
 					if (self::DEBUG || self::TRACE) printf( "[" . date(DATE_RFC822) . "] Filename is: %s" . PHP_EOL , $filename);
+					
 					$a->setFilename($filename);
-					$a->setContent($this->makeBody($bp));
+					$a->setContent(self::makeBody($bp));
 					$a->setContentType($ct);
 					
 					array_push ($this->attachements, $a);
-					
-					
 				}  
-				
 				array_push ($this->allBodyParts, $bp);
 			}	
-			
-				
-			
 		}
     }
     
+    /*
+     * This method creates usable content from the body part object
+     */
     private function makeBody($bp) {
-    	$ret = '';
-        /*
-         * We have to determine if the email is of type multipart
-         */
-        $charset = '';
-        
-        
+    	$ret = '';	// return variable
         
         // Now we parse the body part
         $cte = '';
         
-            if (array_key_exists('content-transfer-encoding', $bp->getHeader())) {
-                $cte = $bp->getHead('content-transfer-encoding');
-                if (self::DEBUG || self::TRACE) printf( "[" . date(DATE_RFC822) . "] Encoding is: %s" . PHP_EOL , $cte);
-            }
-            
-            foreach($bp->getBody() as $bodyLine) {
-                $ret .= $bodyLine . PHP_EOL;
-            }
-            if ($cte === 'base64') {
-                $ret = base64_decode(trim($ret));
-            } else if ($cte === 'quoted-printable') {
-                $ret = quoted_printable_decode(trim($ret));
-            }
+		if (array_key_exists('content-transfer-encoding', $bp->getHeader())) {
+			$cte = $bp->getHead('content-transfer-encoding');
+			if (self::DEBUG || self::TRACE) printf( "[" . date(DATE_RFC822) . "] Encoding is: %s" . PHP_EOL , $cte);
+		}
+		
+		foreach($bp->getBody() as $bodyLine) {
+			$ret .= $bodyLine . PHP_EOL;
+		}
+		if ($cte === 'base64') {
+			$ret = base64_decode(trim($ret));
+		} else if ($cte === 'quoted-printable') {
+			$ret = quoted_printable_decode(trim($ret));
+		}
+		// The explode function leaves some dashes behind. We might need to improve this issue
 		if (substr(trim($ret), -2) == '--') {
 			$ret = substr(trim($ret), 0, -3);
 		}
@@ -167,7 +182,9 @@ class EmailParser {
         return $ret;
     }
     
-    
+    /*
+     * Provide the data according to the content type like 'text/plain'
+     */
     public function getBody($contentType) {
     	$bp = NULL;
     	foreach ($this->allBodyParts as $_bp) {
@@ -179,11 +196,14 @@ class EmailParser {
         
         if ($bp === NULL) return '';
     	
-    	return $this->makeBody($bp);
+    	return self::makeBody($bp);
     	
         
     }
     
+    /*
+     * Helper method to determine an empty line
+     */
     public function isEmptyLine($line) {
         if ($line == "\n" || $line == "\r" || $line == "\r\n" || empty($line)) {
              return TRUE;
@@ -222,12 +242,15 @@ class EmailParser {
         
         return $ret;
     }
+    
+    /*
+     * Extract the header information
+     */
     private function parseHeader($lines) {
         $headerLines = array();
-        
-        
         $previousLine = '';
         $append = FALSE;
+        
         foreach ($lines as $headLine) {
             if (self::TRACE) printf( "[" . date(DATE_RFC822) . "] Header Line: %s" . PHP_EOL , $headLine);
             // End of head?
@@ -285,7 +308,11 @@ class EmailParser {
         
         return $headerLines;
     }
-	function sanitize_file_name( $filename ) {
+    
+    /*
+     * Make it more usable for an os
+     */
+	function sanitizeFileName( $filename ) {
 		$filename_raw = $filename;
 		$special_chars = array("?", "[", "]", "/", "\\", "=", "<", ">", ":", ";", ",", "'", "\"", "&", "$", "#", "*", "(", ")", "|", "~", "`", "!", "{", "}");
 		$filename = str_replace($special_chars, '', $filename);
@@ -293,6 +320,7 @@ class EmailParser {
 		$filename = trim($filename, '.-_');
 		return $filename;
 	}
+	
     public function getSubject() {
         if (!isset($this->headerLines['subject'])) {
             throw new Exception("Couldn't find the subject of the email");
@@ -321,6 +349,17 @@ class EmailParser {
         }
     
         return $this->headerLines['to'];
+    }
+    
+    /*
+     * Helper method to get header information easy
+     */
+    public function getHead($key = '') {
+    	if (array_key_exists($key, $this->headerLines)) {
+    		return $this->headerLines[$key];
+    	} else {
+    		return NULL;
+    	}
     }
     
     public function getContentIds() {
