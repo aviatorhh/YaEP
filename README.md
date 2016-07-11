@@ -4,11 +4,11 @@ Yet another Email Parser
 There might be other email parsers for PHP around but I have taken the challenge to write a simple email parser that gives access to the different content types and extracts attachements.
 
 ## Usage
-The usage is straigt forward.
+The usage is straight forward.
 ```php
 $emailParser = new EmailParser(file_gets_content('test.eml'));
 ```
-### Get the plain text part
+### E.g. get the plain text part
 ```php
 $emailParser->getBody('text/plain');
 ```
