@@ -6,7 +6,7 @@ There might be other email parsers for PHP around but I have taken the challenge
 ## Usage
 The usage is straight forward.
 ```php
-$emailParser = new EmailParser(file_gets_content('test.eml'));
+$emailParser = new EmailParser(file_get_contents('test.eml'));
 ```
 ### E.g. get the plain text part
 ```php

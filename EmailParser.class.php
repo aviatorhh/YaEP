@@ -109,10 +109,9 @@ class EmailParser {
 				// Is it a attachement?
 				if (array_key_exists('content-disposition', $headerLines)) {
 					array_push ($this->contentDispos, trim($headerLines['content-disposition']));
-					
 					$a = new Attachement();
 					
-					preg_match('!filename=(.*)$!mi', $headerLines['content-disposition'] , $matches);
+					preg_match('/.*[;!].*filename=(.*?)[;!]/', $headerLines['content-disposition'] , $matches);
 					$filename = str_replace(array("'", '"'), '', trim($matches[1]));
 					
 					$a->setFilename($filename);
